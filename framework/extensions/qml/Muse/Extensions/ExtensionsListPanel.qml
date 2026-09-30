@@ -191,6 +191,9 @@ Item {
 
         onEnableChanged: function(enabled) {
             extensionsModel.setEnabled(selectedPlugin.uri, enabled)
+            let updated = Object.assign({}, prv.selectedPlugin)
+            updated.enabled = enabled
+            prv.selectedPlugin = updated
         }
 
         onRemoveRequest: function() {
