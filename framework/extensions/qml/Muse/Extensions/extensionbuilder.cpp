@@ -29,6 +29,11 @@
 
 #include "api/v1/ipluginapiv1.h"
 
+#include <memory>
+#include <QDateTime>
+#include <QFileInfo>
+#include <QUrl>
+
 #include "log.h"
 
 using namespace muse::extensions;
@@ -83,6 +88,7 @@ void ExtensionBuilder::load(const QString& extension, const QString& action, QOb
         engin = engine()->qmlEngine();
     }
 
+    engin->clearComponentCache();
     QObject* qmlObj = nullptr;
 
     QString errorString;
@@ -93,11 +99,37 @@ void ExtensionBuilder::load(const QString& extension, const QString& action, QOb
     if (errorString.isEmpty()) {
         //! NOTE We create extension UI using a separate engine to control what we provide,
         //! making it easier to maintain backward compatibility and stability.
-        QQmlComponent component = QQmlComponent(engin, a.path.toQString());
-        if (component.isReady()) {
-            qmlObj = component.createWithInitialProperties({ { "parent", QVariant::fromValue(itemParent) } });
+
+        engin->clearComponentCache();
+
+        const QString pathStr = a.path.toQString();
+        const bool isResource = pathStr.startsWith(":/") || pathStr.startsWith("qrc:");
+
+        std::unique_ptr<QQmlComponent> component;
+        if (!isResource) {
+            ByteArray data;
+            Ret ret = io::File::readFile(a.path, data);
+            if (ret) {
+                QFileInfo fi(pathStr);
+                LOGI() << "ExtensionBuilder::load: " << pathStr
+                       << ", size: " << data.size()
+                       << ", modified: " << fi.lastModified().toString(Qt::ISODateWithMs);
+
+                component = std::make_unique<QQmlComponent>(engin);
+                component->setData(QByteArray(data.toQByteArrayNoCopy()), QUrl::fromLocalFile(pathStr));
+            } else {
+                LOGE() << "failed read file: " << pathStr << ", err: " << ret.toString();
+            }
+        }
+
+        if (!component) {
+            component = std::make_unique<QQmlComponent>(engin, pathStr);
+        }
+
+        if (component->isReady()) {
+            qmlObj = component->createWithInitialProperties({ { "parent", QVariant::fromValue(itemParent) } });
         } else {
-            errorString = component.errorString();
+            errorString = component->errorString();
             LOGE() << "Failed to load QML file: " << a.path << ", from extension: " << uri;
         }
     }
